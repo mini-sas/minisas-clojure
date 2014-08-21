@@ -1,4 +1,4 @@
-(defproject revat-poc "0.1.0-SNAPSHOT"
+(defproject minisas "0.1.0-SNAPSHOT"
   :description "FIXME: write description"
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
@@ -10,6 +10,6 @@
                  [compojure "1.1.8"]
                  [org.clojure/tools.logging "0.3.0"]
                  [com.stuartsierra/component "0.2.1"]]
-  :main ^:skip-aot revat-poc.core
+  :main ^:skip-aot minisas.core
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all}})

@@ -1,4 +1,4 @@
-(ns revat-poc.references
+(ns minisas.references
   (:require [clojure.string :as string]
             [liberator.core :refer [defresource]]
             [liberator.representation :refer [ring-response]]
@@ -9,7 +9,6 @@
 
 
 (defn exists? [ctx name]
-  (println name)
   (let [refs-snapshot @references]
     [(contains? refs-snapshot name)
      {:refs-snapshot refs-snapshot}]))

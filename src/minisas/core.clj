@@ -1,9 +1,9 @@
-(ns revat-poc.core
+(ns minisas.core
   (:gen-class)
   (:require [clojure.edn :as edn]
             [com.stuartsierra.component :as component]
-            [revat-poc.server :refer [new-webservice]]
-            [revat-poc.values :refer [new-value-storage]]))
+            [minisas.server :refer [new-webservice]]
+            [minisas.values :refer [new-value-storage]]))
 
 
 (defn read-config [path]

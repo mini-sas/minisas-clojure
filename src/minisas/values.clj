@@ -1,4 +1,4 @@
-(ns revat-poc.values
+(ns minisas.values
   (:require [com.stuartsierra.component :as component]
             [liberator.core :refer [defresource]]
             [liberator.representation :refer [ring-response]]
