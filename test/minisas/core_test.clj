@@ -1,6 +1,6 @@
-(ns revat-poc.core-test
+(ns minisas.core-test
   (:require [clojure.test :refer :all]
-            [revat-poc.core :refer :all]))
+            [minisas.core :refer :all]))
 
 (deftest a-test
   (testing "FIXME, I fail."
