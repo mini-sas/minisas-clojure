@@ -8,20 +8,22 @@
                                             get-blob
                                             blob
                                             blob-exists?]]
+            [ring.util.response :as response]
             [ring.util.time :refer [format-date]]))
 
 
-;; TODO: configgy stuff in the config
 (defrecord ValueStorage [config]
   component/Lifecycle
 
   (start [this]
-    (let [store (blobstore "filesystem" "foo" "bar" :jclouds.filesystem.basedir "/tmp")
-          container (create-container store "revat-values")]
+    (let [store (blobstore (-> this :config :jclouds :provider)
+                           (-> this :config :jclouds :username)
+                           (-> this :config :jclouds :password))
+          container-name (-> this :config :jclouds :container)]
+      (create-container store container-name)
       (assoc this
         :blobstore store
-        :container "revat-values"
-        :in-flight (atom #{}))))
+        :container container-name)))
 
   (stop [this] this))
 
@@ -34,16 +36,16 @@
 (defn blob-store [ctx] (-> ctx value-storage :blobstore))
 (defn container-name [ctx] (-> ctx value-storage :container))
 (defn blob-name [uuid] (str uuid))
-(defn in-flight? [uuid ctx] (contains? (-> ctx value-storage :in-flight deref) uuid))
 
 
-;; TODO: atomic exists? and put so we don't overwrite.
-(defn put-value [ctx uuid]
-  (let [value (get-in ctx [:request :body])
+(defn post! [ctx]
+  (let [uuid (java.util.UUID/randomUUID)
+        value (get-in ctx [:request :body])
         b (blob (blob-name uuid)
                 :payload value
                 :content-type (get-in ctx [:request :headers "content-type"]))]
-    (put-blob (blob-store ctx) (container-name ctx) b)))
+    (put-blob (blob-store ctx) (container-name ctx) b)
+    {:uuid uuid}))
 
 
 (defn exists? [ctx name]
@@ -54,37 +56,49 @@
     (catch IllegalArgumentException e false)))
 
 
-(defn year-from-now []
+(defn one-year-from [when]
   (-> (doto (java.util.Calendar/getInstance)
-        (.setTime (java.util.Date.))
+        (.setTime when)
         (.add java.util.Calendar/YEAR 1))
       (.getTime)))
 
 
-;; TODO: content-type doesn't seem to be saved in filesystem storage.
+;; NOTE: content-type doesn't seem to be saved in filesystem storage.
 (defn get-value [ctx name]
   (let [b (get-blob (blob-store ctx)
                     (container-name ctx)
                     (-> ctx :uuid blob-name))
         ctype (-> b (.getMetadata) (.getContentMetadata) (.getContentType))]
-    (ring-response {:status 200
-                    :headers {"Immutable" ""
-                              "Expires" (format-date (year-from-now))
-                              "Content-Type" ctype}
-                    :body (-> b (.getPayload) (.openStream))})))
+
+    (-> (response/response (-> b (.getPayload) (.openStream)))
+        (response/header "Expires" (-> (java.util.Date.)
+                                       one-year-from
+                                       format-date))
+        (response/header "Immutable" true)
+        (response/header "Content-Type" ctype)
+        ring-response)))
 
 
-(defn conflict? [ctx]
-  (when (= :put (get-in ctx [:request :request-method]))
-    (:blob-exists ctx)))
+(defn build-entry-url [request id]
+  (java.net.URL. (format "%s://%s:%s%s/%s"
+                (name (:scheme request))
+                (:server-name request)
+                (:server-port request)
+                (:uri request)
+                (str id))))
 
 
-;; TODO a post! endpoint
 (defresource named-value [name]
   :available-media-types ["*/*"]
-  :allowed-methods [:get :put :post]
+  :allowed-methods [:get]
   :exists? (fn [ctx] (exists? ctx name))
-  :conflict? conflict?
   :handle-ok (fn [ctx] (get-value ctx name))
-  :handle-exception (fn [ctx] (throw (:exception ctx)))
-  :put! (fn [ctx] (put-value ctx (:uuid ctx))))
+  :handle-exception (fn [ctx] (throw (:exception ctx))))
+
+
+(defresource named-value-set
+  :available-media-types ["*/*"]
+  :allowed-methods [:post]
+  :post! post!
+  :post-redirect? true
+  :location (fn [ctx] (build-entry-url (:request ctx) (:uuid ctx))))
