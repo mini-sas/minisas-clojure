@@ -1,5 +1,6 @@
 (ns revat-poc.references
-  (:require [liberator.core :refer [defresource]]
+  (:require [clojure.string :as string]
+            [liberator.core :refer [defresource]]
             [liberator.representation :refer [ring-response]]
             [ring.util.response :as response]))
 
@@ -22,25 +23,45 @@
 (defn valid-url? [url-str]
   (try
     (java.net.URL. url-str)
-    (catch java.net.MalformedURLException e false)))
+    (catch java.net.MalformedURLException e false)
+    (catch NullPointerException e false)))
+
+
+(defn put-request? [ctx]
+  (= :put (-> ctx :request :request-method)))
+
+
+(defn trimsplit [s delimiter]
+  (map string/trim (.split s delimiter)))
+
+
+(defn parse-content-type [ctx]
+  ;; Content-Type looks like this:
+  ;;   message/external-body; access-type=URL; URL="http://www.foo.com/file"
+
+  (let [entry (get-in ctx [:request :headers "content-type"])
+        [content-type & param-list] (trimsplit entry ";")
+        param-map (reduce merge {}
+                          (map (fn [p] (let [[k v] (trimsplit p "=")]
+                                         {(-> k (.toLowerCase) keyword) v}))
+                               param-list))]
+    {:content-type (.toLowerCase content-type)
+     :params param-map}))
+
+
+(defn processable? [ctx]
+  (if (put-request? ctx)
+    (let [url (valid-url? (:url-string ctx))]
+      [url {:url url}])
+    true))
 
 
 (defn known-content-type? [ctx]
-  ;; parse wonky content-type pieces
-  ;; validate that shit
-  ;; attach to the ctx
-  (let [ctype (get-in ctx [:request :headers "content-type"])]
-    (println ctype)
-    true
-    )
-
-  )
-
-(defn malformed? [ctx]
-  (when (= :put (-> ctx :request :request-method))
-    (let [body (-> ctx :request :body slurp)
-          url (valid-url? body)]
-      [(not url) {:url url}])))
+  (if (put-request? ctx)
+    (let [{:keys [content-type params]} (parse-content-type ctx)]
+      [(= "message/external-body" content-type)
+       {:url-string (:url params)}])
+    true))
 
 
 (defn put! [ctx name]
@@ -52,14 +73,8 @@
   :allowed-methods [:put :get]
   :can-put-to-missing? true
   :known-content-type? known-content-type?
-  :malformed? malformed?
+  :processable? processable?
   :exists? (fn [ctx] (exists? ctx name))
   :handle-ok (fn [ctx] (handle-deref ctx name))
-  :handle-exception (fn [ctx] (println (:exception ctx)))
+  :handle-exception (fn [ctx] (.printStackTrace (:exception ctx)))
   :put! (fn [ctx] (put! ctx name)))
-
-
-;; http://tools.ietf.org/html/rfc1521#page-42
-;; message/external-body
-;; Content-type: message/external-body; access-type=URL;
-;;                  URL="http://www.foo.com/file"
