@@ -48,10 +48,19 @@
      :params param-map}))
 
 
+(defn cas-header-ok? [ctx]
+  (let [cas-header (get-in ctx [:request :headers "if-match"])
+        cas-url (valid-url? cas-header)]
+    (if (nil? cas-header)
+      [true {}]
+      [cas-url {:cas-url cas-url}])))
+
+
 (defn processable? [ctx]
   (if (put-request? ctx)
-    (let [url (valid-url? (:url-string ctx))]
-      [url {:url url}])
+    (let [url (valid-url? (:url-string ctx))
+          cas-result (cas-header-ok? ctx)] ;; could be composed better :-[
+      [(and url (first cas-result)) (merge {:url url} (second cas-result))])
     true))
 
 
@@ -63,8 +72,32 @@
     true))
 
 
+(defn compare-and-set-swapfn [name oldval newval]
+  ;; I'm going to hell for this.
+  (fn [a]
+    (let [current-val (get a name)]
+      (when (not (= current-val oldval))
+        (throw (ex-info "CAS Failed" {:cas-failed true
+                                      :expected oldval
+                                      :was current-val})))
+      (assoc a name newval))))
+
+
+(defn handle-exception [ctx]
+  ;; Liberator shortcoming. Can't bail out from put! with a failure/status code.
+  (let [details (-> ctx :exception ex-data)]
+    (if (seq details)
+      (ring-response (-> (response/response "Compare-And-Set failed")
+                         (response/status 412)))
+      (.printStackTrace (:exception ctx)))))
+
+
 (defn put! [ctx name]
-  (swap! references assoc name (:url ctx)))
+  (let [cas-oldval (valid-url? (get-in ctx [:request :headers "if-match"]))]
+    (if cas-oldval
+      (swap! references (compare-and-set-swapfn name cas-oldval (:url ctx)))
+      (swap! references assoc name (:url ctx)))))
+
 
 
 (defresource reference [name]
@@ -73,7 +106,8 @@
   :can-put-to-missing? true
   :known-content-type? known-content-type?
   :processable? processable?
+  :etag-matches-for-if-match? true
   :exists? (fn [ctx] (exists? ctx name))
   :handle-ok (fn [ctx] (handle-deref ctx name))
-  :handle-exception (fn [ctx] (.printStackTrace (:exception ctx)))
+  :handle-exception handle-exception
   :put! (fn [ctx] (put! ctx name)))
